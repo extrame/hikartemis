@@ -1,4 +1,4 @@
-package hikvisionOpenAPIGo
+package hikartemis
 
 import (
 	"bytes"
@@ -10,13 +10,18 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"github.com/gofrs/uuid"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/pkg/errors"
+
+	"github.com/extrame/hikartemis/camera"
+	"github.com/extrame/hikartemis/region"
+	"github.com/gofrs/uuid"
 )
 
 // HKConfig 海康OpenAPI配置参数
@@ -26,46 +31,46 @@ type HKConfig struct {
 	AppKey  string //平台APPKey
 	Secret  string //平台APPSecret
 	IsHttps bool   //是否使用HTTPS协议
+	client  *http.Client
 }
 
 // 返回结果
-type Result struct {
+type BaseResult struct {
 	Code string      `json:"code"`
 	Msg  string      `json:"msg"`
 	Data interface{} `json:"data"`
 }
 
 // 返回值data
-type Data struct {
-	Total    int                      `json:"total"`
-	PageSize int                      `json:"pageSize"`
-	PageNo   int                      `json:"pageNo"`
-	List     []map[string]interface{} `json:"list"`
+type ListData struct {
+	Total    int         `json:"total"`
+	PageSize int         `json:"pageSize"`
+	PageNo   int         `json:"pageNo"`
+	List     interface{} `json:"list"`
 }
 
-// @title		HTTP Post请求
-// @url			HTTP接口Url		string				 HTTP接口Url，不带协议和端口，如/artemis/api/resource/v1/org/advance/orgList
-// @body		请求参数			map[string]string
-// @return		请求结果			参数类型
-func (hk HKConfig) HttpPost(url string, body map[string]string, timeout int) (result Result, err error) {
-	var header = make(map[string]string)
-	bodyJson, err := json.Marshal(body)
-	if err != nil {
-		return result, err
+func (d *ListData) UnmarshalJSON(data []byte) error {
+	type Alias ListData
+	aux := &struct {
+		Total    int             `json:"total"`
+		PageSize int             `json:"pageSize"`
+		PageNo   int             `json:"pageNo"`
+		List     json.RawMessage `json:"list"`
+	}{}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
 	}
-	err = hk.initRequest(header, url, string(bodyJson), true)
-	if err != nil {
-		return Result{}, err
+	if d.List == nil {
+		return nil
 	}
-	var sb []string
-	if hk.IsHttps {
-		sb = append(sb, "https://")
-	} else {
-		sb = append(sb, "http://")
+	fmt.Printf("%T, %v", d.List, d.List)
+	if err := json.Unmarshal(aux.List, d.List); err != nil {
+		return errors.Wrap(err, "failed to unmarshal list"+string(aux.List))
 	}
-	sb = append(sb, fmt.Sprintf("%s:%d", hk.Ip, hk.Port))
-	sb = append(sb, url)
+	return nil
+}
 
+func (hk *HKConfig) Init(timeout int) {
 	client := &http.Client{}
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		return http.ErrUseLastResponse
@@ -77,6 +82,32 @@ func (hk HKConfig) HttpPost(url string, body map[string]string, timeout int) (re
 		}
 		client.Transport = tr
 	}
+	hk.client = client
+}
+
+// @title		HTTP Post请求
+// @url			HTTP接口Url		string				 HTTP接口Url，不带协议和端口，如/artemis/api/resource/v1/org/advance/orgList
+// @body		请求参数			map[string]string
+// @return		请求结果			参数类型
+func (hk *HKConfig) HttpPost(url string, body interface{}, resp interface{}) (result *BaseResult, err error) {
+	var header = make(map[string]string)
+	bodyJson, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	err = hk.initRequest(header, url, string(bodyJson), true)
+	if err != nil {
+		return nil, err
+	}
+	var sb []string
+	if hk.IsHttps {
+		sb = append(sb, "https://")
+	} else {
+		sb = append(sb, "http://")
+	}
+	sb = append(sb, fmt.Sprintf("%s:%d", hk.Ip, hk.Port))
+	sb = append(sb, url)
+
 	req, err := http.NewRequest("POST", strings.Join(sb, ""), bytes.NewReader(bodyJson))
 	if err != nil {
 		return
@@ -89,14 +120,73 @@ func (hk HKConfig) HttpPost(url string, body map[string]string, timeout int) (re
 			req.Header.Set(k, v)
 		}
 	}
-	resp, err := client.Do(req)
+	httpresp, err := hk.client.Do(req)
+	if err != nil {
+		return
+	}
+	defer httpresp.Body.Close()
+	if httpresp.StatusCode == http.StatusOK {
+		var resBody []byte
+		resBody, err = io.ReadAll(httpresp.Body)
+		if err != nil {
+			return
+		}
+		result = &BaseResult{
+			Data: resp,
+		}
+		err = json.Unmarshal(resBody, result)
+	} else if httpresp.StatusCode == http.StatusFound || httpresp.StatusCode == http.StatusMovedPermanently {
+		reqUrl := httpresp.Header.Get("Location")
+		err = fmt.Errorf("HttpPost Response StatusCode：%d，Location：%s", httpresp.StatusCode, reqUrl)
+	} else {
+		err = fmt.Errorf("HttpPost Response StatusCode：%d", httpresp.StatusCode)
+	}
+	return
+}
+
+// @title		HTTP Post请求
+// @url			HTTP接口Url		string				 HTTP接口Url，不带协议和端口，如/artemis/api/resource/v1/org/advance/orgList
+// @body		请求参数			map[string]string
+// @return		请求结果			参数类型
+func (hk *HKConfig) RawHttpPost(url string, body map[string]string) (result BaseResult, err error) {
+	var header = make(map[string]string)
+	bodyJson, err := json.Marshal(body)
+	if err != nil {
+		return result, err
+	}
+	err = hk.initRequest(header, url, string(bodyJson), true)
+	if err != nil {
+		return BaseResult{}, err
+	}
+	var sb []string
+	if hk.IsHttps {
+		sb = append(sb, "https://")
+	} else {
+		sb = append(sb, "http://")
+	}
+	sb = append(sb, fmt.Sprintf("%s:%d", hk.Ip, hk.Port))
+	sb = append(sb, url)
+
+	req, err := http.NewRequest("POST", strings.Join(sb, ""), bytes.NewReader(bodyJson))
+	if err != nil {
+		return
+	}
+
+	req.Header.Set("Accept", header["Accept"])
+	req.Header.Set("Content-Type", header["Content-Type"])
+	for k, v := range header {
+		if strings.Contains(k, "x-ca-") {
+			req.Header.Set(k, v)
+		}
+	}
+	resp, err := hk.client.Do(req)
 	if err != nil {
 		return
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusOK {
 		var resBody []byte
-		resBody, err = ioutil.ReadAll(resp.Body)
+		resBody, err = io.ReadAll(resp.Body)
 		if err != nil {
 			return
 		}
@@ -223,4 +313,93 @@ func buildSignHeader(header map[string]string) string {
 
 	header["x-ca-signature-headers"] = strings.Join(sbSignHeader, "")
 	return strings.Join(sb, "")
+}
+
+func (hk HKConfig) GetCameraList(regions ...string) (camera.CameraList, error) {
+	body := map[string]interface{}{
+		"pageNo":           "1",
+		"pageSize":         "100",
+		"regionIndexCodes": regions,
+		"isSubRegion":      true,
+	}
+	var resq = make(camera.CameraList, 0)
+	result, err := hk.HttpPost("/artemis/api/resource/v2/camera/search", body, &ListData{
+		List: &resq,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var list = result.Data.(*ListData)
+	var data = list.List.(*camera.CameraList)
+	return *data, nil
+}
+
+func (hk HKConfig) GetCameraUrl(cam *camera.Camera) (*camera.Url, error) {
+	body := map[string]interface{}{
+		"cameraIndexCode": cam.IndexCode,
+		"streamType":      0,
+		"protocol":        "wss",
+		"streamform":      "ps",
+	}
+	var resq camera.Url
+	result, err := hk.HttpPost("/artemis/api/video/v2/cameras/previewURLs", body, &resq)
+	if err != nil {
+		return nil, err
+	}
+	var data = result.Data.(*camera.Url)
+	return data, nil
+}
+
+func (hk HKConfig) GetResourceList() (camera.CameraList, error) {
+	body := map[string]string{
+		"pageNo":   "1",
+		"pageSize": "100",
+	}
+	var resp = make(camera.CameraList, 0)
+	result, err := hk.HttpPost("/artemis/api/irds/v2/resource/resourcesByParams", body, &ListData{
+		List: &resp,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if result.Code != "0" {
+		return nil, errors.New(result.Msg)
+	}
+	var list = result.Data.(*ListData)
+	var data = list.List.(*camera.CameraList)
+	return *data, nil
+}
+
+func (hk HKConfig) GetRootRegion() (*region.Region, error) {
+	body := map[string]string{
+		"treeCode": "0",
+	}
+	var resp region.Region
+	result, err := hk.HttpPost("/artemis/api/resource/v1/regions/root", body, &resp)
+	if err != nil {
+		return nil, err
+	}
+	if result.Code != "0" {
+		return nil, errors.New(result.Msg)
+	}
+	var data = result.Data.(*region.Region)
+	return data, nil
+}
+
+func (hk HKConfig) GetSubRegion(parentIndexCode string) (region.RegionList, error) {
+	body := map[string]string{
+		"parentIndexCode": parentIndexCode,
+		"pageNo":          "1",
+		"pageSize":        "100",
+	}
+	var resp region.RegionList
+	result, err := hk.HttpPost("/artemis/api/resource/v1/regions/subRegions", body, &resp)
+	if err != nil {
+		return nil, err
+	}
+	if result.Code != "0" {
+		return nil, errors.New(result.Msg)
+	}
+	var data = result.Data.(*region.RegionList)
+	return *data, nil
 }

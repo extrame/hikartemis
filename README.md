@@ -1,4 +1,4 @@
-# hikvisionOpenAPIGo
+# hikartemis
 > 海康威视OpenAPI安全认证库 - Golang版本实现
 # 官网
 
@@ -7,12 +7,12 @@
 其他语言版本：[下载链接](https://open.hikvision.com/download/5c67f1e2f05948198c909700?type=10)
 # 快速使用
 ````
-> go get github.com/zxbit2011/hikvisionOpenAPIGo
+> go get github.com/extrame/hikartemis
 ````
 # 示例代码
 ````
 func TestSDK(t *testing.T) {
-	hk := hikvisionOpenAPIGo.HKConfig{
+	hk := hikartemis.HKConfig{
 		Ip:      "127.0.0.1",
 		Port:    443,
 		AppKey:  "28057000",

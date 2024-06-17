@@ -2,12 +2,13 @@ package examples
 
 import (
 	"encoding/json"
-	"github.com/zxbit2011/hikvisionOpenAPIGo"
 	"testing"
+
+	"github.com/extrame/hikartemis"
 )
 
 func TestSDK(t *testing.T) {
-	hk := hikvisionOpenAPIGo.HKConfig{
+	hk := hikartemis.HKConfig{
 		Ip:      "127.0.0.1",
 		Port:    443,
 		AppKey:  "28057000",
