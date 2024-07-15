@@ -148,7 +148,7 @@ func (hk *HKConfig) HttpPost(url string, body interface{}, resp interface{}) (re
 // @url			HTTP接口Url		string				 HTTP接口Url，不带协议和端口，如/artemis/api/resource/v1/org/advance/orgList
 // @body		请求参数			map[string]string
 // @return		请求结果			参数类型
-func (hk *HKConfig) RawHttpPost(url string, body map[string]string) (result BaseResult, err error) {
+func (hk *HKConfig) RawHttpPost(url string, body map[string]interface{}) (result BaseResult, err error) {
 	var header = make(map[string]string)
 	bodyJson, err := json.Marshal(body)
 	if err != nil {
@@ -201,7 +201,7 @@ func (hk *HKConfig) RawHttpPost(url string, body map[string]string) (result Base
 }
 
 // initRequest 初始化请求头
-func (hk HKConfig) initRequest(header map[string]string, url, body string, isPost bool) error {
+func (hk *HKConfig) initRequest(header map[string]string, url, body string, isPost bool) error {
 	header["Accept"] = "application/json"
 	header["Content-Type"] = "application/json"
 	if isPost {
@@ -315,10 +315,10 @@ func buildSignHeader(header map[string]string) string {
 	return strings.Join(sb, "")
 }
 
-func (hk HKConfig) GetCameraList(regions ...string) (camera.CameraList, error) {
+func (hk *HKConfig) GetCameraList(regions ...string) (camera.CameraList, error) {
 	body := map[string]interface{}{
 		"pageNo":           "1",
-		"pageSize":         "100",
+		"pageSize":         "1000",
 		"regionIndexCodes": regions,
 		"isSubRegion":      true,
 	}
@@ -334,11 +334,16 @@ func (hk HKConfig) GetCameraList(regions ...string) (camera.CameraList, error) {
 	return *data, nil
 }
 
-func (hk HKConfig) GetCameraUrl(cam *camera.Camera) (*camera.Url, error) {
+func (hk *HKConfig) GetCameraUrl(cam *camera.Camera, typ ...string) (*camera.Url, error) {
+	var protocol = "wss"
+
+	if len(typ) > 0 {
+		protocol = typ[0]
+	}
 	body := map[string]interface{}{
 		"cameraIndexCode": cam.IndexCode,
 		"streamType":      0,
-		"protocol":        "wss",
+		"protocol":        protocol,
 		"streamform":      "ps",
 	}
 	var resq camera.Url
@@ -350,7 +355,7 @@ func (hk HKConfig) GetCameraUrl(cam *camera.Camera) (*camera.Url, error) {
 	return data, nil
 }
 
-func (hk HKConfig) GetResourceList() (camera.CameraList, error) {
+func (hk *HKConfig) GetResourceList() (camera.CameraList, error) {
 	body := map[string]string{
 		"pageNo":   "1",
 		"pageSize": "100",
@@ -370,7 +375,7 @@ func (hk HKConfig) GetResourceList() (camera.CameraList, error) {
 	return *data, nil
 }
 
-func (hk HKConfig) GetRootRegion() (*region.Region, error) {
+func (hk *HKConfig) GetRootRegion() (*region.Region, error) {
 	body := map[string]string{
 		"treeCode": "0",
 	}
@@ -386,7 +391,7 @@ func (hk HKConfig) GetRootRegion() (*region.Region, error) {
 	return data, nil
 }
 
-func (hk HKConfig) GetSubRegion(parentIndexCode string) (region.RegionList, error) {
+func (hk *HKConfig) GetSubRegion(parentIndexCode string) (region.RegionList, error) {
 	body := map[string]string{
 		"parentIndexCode": parentIndexCode,
 		"pageNo":          "1",
@@ -402,4 +407,63 @@ func (hk HKConfig) GetSubRegion(parentIndexCode string) (region.RegionList, erro
 	}
 	var data = result.Data.(*region.RegionList)
 	return *data, nil
+}
+
+const (
+	PTZ_LEFT_UP      = "LEFT_UP"
+	PTZ_LEFT_DOWN    = "LEFT_DOWN"
+	PTZ_RIGHT_UP     = "RIGHT_UP"
+	PTZ_RIGHT_DOWN   = "RIGHT_DOWN"
+	PTZ_FOCUS_NEAR   = "FOCUS_NEAR"
+	PTZ_FOCUS_FAR    = "FOCUS_FAR"
+	PTZ_IRIS_ENLARGE = "IRIS_ENLARGE"
+	PTZ_IRIS_REDUCE  = "IRIS_REDUCE"
+	PTZ_WIPER_SWITCH = "WIPER_SWITCH"
+	PTZ_START_RECORD = "START_RECORD_TRACK"
+	PTZ_STOP_RECORD  = "STOP_RECORD_TRACK"
+	PTZ_START_TRACK  = "START_TRACK"
+	PTZ_STOP_TRACK   = "STOP_TRACK"
+	PTZ_GOTO_PRESET  = "GOTO_PRESET"
+)
+
+// ControlCamera 控制摄像头
+// @param cam 摄像头
+// @param command 不区分大小写 说明： LEFT 左转 RIGHT右转 UP 上转 DOWN 下转 ZOOM_IN 焦距变大 ZOOM_OUT 焦距变小
+//
+//	LEFT_UP 左上 LEFT_DOWN 左下 RIGHT_UP 右上 RIGHT_DOWN 右下 FOCUS_NEAR 焦点前移 FOCUS_FAR 焦点后移
+//	IRIS_ENLARGE 光圈扩大 IRIS_REDUCE 光圈缩小 WIPER_SWITCH 接通雨刷开关 START_RECORD_TRACK 开始记录轨迹
+//	STOP_RECORD_TRACK 停止记录轨迹 START_TRACK 开始轨迹 STOP_TRACK 停止轨迹 以下命令presetIndex不可为空： GOTO_PRESET到预置点
+func (hk *HKConfig) ControlCamera(cam *camera.Camera, command string, start bool, preset ...int) error {
+	var action = 0
+	if !start {
+		action = 1
+	}
+	body := map[string]interface{}{
+		"cameraIndexCode": cam.IndexCode,
+		"action":          action,
+		"command":         command,
+	}
+	if len(preset) > 0 {
+		body["presetIndex"] = preset[0]
+	}
+	_, err := hk.RawHttpPost("/artemis/api/video/v1/ptzs/controlling", body)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// StartControlCamera 开始控制摄像头
+func (hk *HKConfig) StartControlCamera(cam *camera.Camera, command string) error {
+	return hk.ControlCamera(cam, command, true)
+}
+
+// StopControlCamera 停止控制摄像头
+func (hk *HKConfig) StopControlCamera(cam *camera.Camera, command string) error {
+	return hk.ControlCamera(cam, command, false)
+}
+
+// GotoPreset 到预置点
+func (hk *HKConfig) GotoPreset(cam *camera.Camera, presetIndex int) error {
+	return hk.ControlCamera(cam, PTZ_GOTO_PRESET, true, presetIndex)
 }
