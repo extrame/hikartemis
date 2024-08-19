@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strconv"
@@ -108,6 +109,8 @@ func (hk *HKConfig) HttpPost(url string, body interface{}, resp interface{}) (re
 	sb = append(sb, fmt.Sprintf("%s:%d", hk.Ip, hk.Port))
 	sb = append(sb, url)
 
+	slog.Info("http post", "url", strings.Join(sb, ""), "body", string(bodyJson))
+
 	req, err := http.NewRequest("POST", strings.Join(sb, ""), bytes.NewReader(bodyJson))
 	if err != nil {
 		return
@@ -131,6 +134,7 @@ func (hk *HKConfig) HttpPost(url string, body interface{}, resp interface{}) (re
 		if err != nil {
 			return
 		}
+		slog.Info("http post response", "response", string(resBody))
 		result = &BaseResult{
 			Data: resp,
 		}
@@ -350,6 +354,10 @@ func (hk *HKConfig) GetCameraUrl(cam *camera.Camera, typ ...string) (*camera.Url
 	result, err := hk.HttpPost("/artemis/api/video/v2/cameras/previewURLs", body, &resq)
 	if err != nil {
 		return nil, err
+	}
+	var rawData = result.Data
+	if rawData == nil {
+		return nil, errors.New("data is nil")
 	}
 	var data = result.Data.(*camera.Url)
 	return data, nil
