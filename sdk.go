@@ -363,6 +363,34 @@ func (hk *HKConfig) GetCameraUrl(cam *camera.Camera, typ ...string) (*camera.Url
 	return data, nil
 }
 
+// 获得回放地址
+func (hk *HKConfig) GetPlaybackUrl(cam *camera.Camera, start, end time.Time, typ ...string) (*camera.Url, error) {
+	var protocol = "wss"
+
+	if len(typ) > 0 {
+		protocol = typ[0]
+	}
+	body := map[string]interface{}{
+		"cameraIndexCode": cam.IndexCode,
+		"recordLocation":  0,
+		"protocol":        protocol,
+		"streamform":      "ps",
+		"startTime":       start.Format("2006-01-02 15:04:05"),
+		"endTime":         end.Format("2006-01-02 15:04:05"),
+	}
+	var resq camera.Url
+	result, err := hk.HttpPost("/artemis/api/video/v2/cameras/playbackURLs", body, &resq)
+	if err != nil {
+		return nil, err
+	}
+	var rawData = result
+	if rawData == nil {
+		return nil, errors.New("data is nil")
+	}
+	var data = result.Data.(*camera.Url)
+	return data, nil
+}
+
 func (hk *HKConfig) GetResourceList() (camera.CameraList, error) {
 	body := map[string]string{
 		"pageNo":   "1",
@@ -412,6 +440,9 @@ func (hk *HKConfig) GetSubRegion(parentIndexCode string) (region.RegionList, err
 	}
 	if result.Code != "0" {
 		return nil, errors.New(result.Msg)
+	}
+	if result.Data == nil {
+		return make(region.RegionList, 0), nil
 	}
 	var data = result.Data.(*region.RegionList)
 	return *data, nil
