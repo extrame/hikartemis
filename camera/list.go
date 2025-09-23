@@ -38,7 +38,7 @@ type Url struct {
 	Url string `json:"url"`
 }
 
-type PlayBackUrls struct {
+type PlayBackUrl struct {
 	List []PlayBackInfo `json:"list"`
 	Uuid string         `json:"uuid"`
 	Url  string         `json:"url"`

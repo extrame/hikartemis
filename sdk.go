@@ -364,7 +364,7 @@ func (hk *HKConfig) GetCameraUrl(cam *camera.Camera, typ ...string) (*camera.Url
 }
 
 // 获得回放地址
-func (hk *HKConfig) GetPlaybackUrl(cam *camera.Camera, start, end time.Time, typ ...string) (*camera.Url, error) {
+func (hk *HKConfig) GetPlaybackUrl(cam *camera.Camera, start, end time.Time, uuid string, typ ...string) (*camera.PlayBackUrl, error) {
 	var protocol = "wss"
 
 	if len(typ) > 0 {
@@ -375,10 +375,11 @@ func (hk *HKConfig) GetPlaybackUrl(cam *camera.Camera, start, end time.Time, typ
 		"recordLocation":  0,
 		"protocol":        protocol,
 		"streamform":      "ps",
-		"startTime":       start.Format("2006-01-02 15:04:05"),
-		"endTime":         end.Format("2006-01-02 15:04:05"),
+		"beginTime":       start.Format(time.RFC3339),
+		"endTime":         end.Format(time.RFC3339),
+		"uuid":            uuid,
 	}
-	var resq camera.Url
+	var resq camera.PlayBackUrl
 	result, err := hk.HttpPost("/artemis/api/video/v2/cameras/playbackURLs", body, &resq)
 	if err != nil {
 		return nil, err
@@ -387,7 +388,7 @@ func (hk *HKConfig) GetPlaybackUrl(cam *camera.Camera, start, end time.Time, typ
 	if rawData == nil {
 		return nil, errors.New("data is nil")
 	}
-	var data = result.Data.(*camera.Url)
+	var data = result.Data.(*camera.PlayBackUrl)
 	return data, nil
 }
 
