@@ -375,8 +375,8 @@ func (hk *HKConfig) GetPlaybackUrl(cam *camera.Camera, start, end time.Time, uui
 		"recordLocation":  0,
 		"protocol":        protocol,
 		"streamform":      "ps",
-		"beginTime":       start.Format(time.RFC3339),
-		"endTime":         end.Format(time.RFC3339),
+		"beginTime":       start.Local().Format("2006-01-02T15:04:05.000Z07:00"),
+		"endTime":         end.Local().Format("2006-01-02T15:04:05.000Z07:00"),
 		"uuid":            uuid,
 	}
 	var resq camera.PlayBackUrl
@@ -388,8 +388,11 @@ func (hk *HKConfig) GetPlaybackUrl(cam *camera.Camera, start, end time.Time, uui
 	if rawData == nil {
 		return nil, errors.New("data is nil")
 	}
-	var data = result.Data.(*camera.PlayBackUrl)
-	return data, nil
+	if result.Data != nil {
+		var data = result.Data.(*camera.PlayBackUrl)
+		return data, nil
+	}
+	return nil, errors.New("data is nil")
 }
 
 func (hk *HKConfig) GetResourceList() (camera.CameraList, error) {
@@ -466,25 +469,31 @@ const (
 	PTZ_GOTO_PRESET  = "GOTO_PRESET"
 )
 
+// CameraControlParams 摄像头控制参数
+type CameraControlParams struct {
+	Command     string // 控制命令，不区分大小写
+	Start       bool   // 是否开始控制
+	Speed       *int
+	PresetIndex *int // 预置点索引，仅GOTO_PRESET命令需要
+}
+
 // ControlCamera 控制摄像头
-// @param cam 摄像头
-// @param command 不区分大小写 说明： LEFT 左转 RIGHT右转 UP 上转 DOWN 下转 ZOOM_IN 焦距变大 ZOOM_OUT 焦距变小
-//
-//	LEFT_UP 左上 LEFT_DOWN 左下 RIGHT_UP 右上 RIGHT_DOWN 右下 FOCUS_NEAR 焦点前移 FOCUS_FAR 焦点后移
-//	IRIS_ENLARGE 光圈扩大 IRIS_REDUCE 光圈缩小 WIPER_SWITCH 接通雨刷开关 START_RECORD_TRACK 开始记录轨迹
-//	STOP_RECORD_TRACK 停止记录轨迹 START_TRACK 开始轨迹 STOP_TRACK 停止轨迹 以下命令presetIndex不可为空： GOTO_PRESET到预置点
-func (hk *HKConfig) ControlCamera(cam *camera.Camera, command string, start bool, preset ...int) error {
+// @param params 控制参数
+func (hk *HKConfig) ControlCamera(cam *camera.Camera, params CameraControlParams) error {
 	var action = 0
-	if !start {
+	if !params.Start {
 		action = 1
 	}
 	body := map[string]interface{}{
 		"cameraIndexCode": cam.IndexCode,
 		"action":          action,
-		"command":         command,
+		"command":         params.Command,
 	}
-	if len(preset) > 0 {
-		body["presetIndex"] = preset[0]
+	if params.PresetIndex != nil {
+		body["presetIndex"] = *params.PresetIndex
+	}
+	if params.Speed != nil {
+		body["speed"] = *params.Speed
 	}
 	_, err := hk.RawHttpPost("/artemis/api/video/v1/ptzs/controlling", body)
 	if err != nil {
@@ -495,15 +504,25 @@ func (hk *HKConfig) ControlCamera(cam *camera.Camera, command string, start bool
 
 // StartControlCamera 开始控制摄像头
 func (hk *HKConfig) StartControlCamera(cam *camera.Camera, command string) error {
-	return hk.ControlCamera(cam, command, true)
+	return hk.ControlCamera(cam, CameraControlParams{
+		Command: command,
+		Start:   true,
+	})
 }
 
 // StopControlCamera 停止控制摄像头
 func (hk *HKConfig) StopControlCamera(cam *camera.Camera, command string) error {
-	return hk.ControlCamera(cam, command, false)
+	return hk.ControlCamera(cam, CameraControlParams{
+		Command: command,
+		Start:   false,
+	})
 }
 
 // GotoPreset 到预置点
 func (hk *HKConfig) GotoPreset(cam *camera.Camera, presetIndex int) error {
-	return hk.ControlCamera(cam, PTZ_GOTO_PRESET, true, presetIndex)
+	return hk.ControlCamera(cam, CameraControlParams{
+		Command:     PTZ_GOTO_PRESET,
+		Start:       true,
+		PresetIndex: &presetIndex,
+	})
 }
